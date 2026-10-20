@@ -1,0 +1,129 @@
+package com.pinpic.app.activity;
+
+import android.app.Activity;
+import android.content.Context;
+import android.text.Editable;
+import android.text.InputType;
+import android.text.TextWatcher;
+import android.view.Gravity;
+import android.view.View;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
+import android.widget.EditText;
+import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+
+import com.pinpic.app.IconDrawable;
+import com.pinpic.app.M3;
+
+/** Cari: kolom pencarian + hasil gambar. Hasil muncul setelah kata kunci dikirim. */
+public final class SearchScreen implements Screen {
+
+    private final Activity act;
+    private final LinearLayout root;
+    private final LinearLayout header;
+    private final EditText input;
+    private final View clearBtn;
+    private final TextView hint;
+    private final FeedView feed;
+
+    public SearchScreen(Activity act, ScreenHost host) {
+        this.act = act;
+
+        root = new LinearLayout(act);
+        root.setOrientation(LinearLayout.VERTICAL);
+
+        header = new LinearLayout(act);
+        header.setOrientation(LinearLayout.VERTICAL);
+
+        TextView title = M3.text(act, "Cari", 34, M3.primary, true);
+        title.setLetterSpacing(-0.02f);
+        header.addView(title, Ui.lp(-2, -2, M3.dp(4), 0, 0, 0));
+
+        LinearLayout bar = new LinearLayout(act);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setBackground(M3.shape(M3.surfaceContainerHigh, 28));
+        bar.setPadding(M3.dp(18), 0, M3.dp(8), 0);
+        bar.addView(Ui.icon(act, IconDrawable.SEARCH, M3.onSurfaceVariant),
+                new LinearLayout.LayoutParams(M3.dp(22), M3.dp(22)));
+
+        input = new EditText(act);
+        input.setBackground(null);
+        input.setHint("Cari gambar dari mana saja");
+        input.setHintTextColor(M3.onSurfaceVariant);
+        input.setTextColor(M3.onSurface);
+        input.setTextSize(16);
+        input.setSingleLine(true);
+        input.setInputType(InputType.TYPE_CLASS_TEXT);
+        input.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
+        input.setPadding(M3.dp(12), 0, M3.dp(8), 0);
+        bar.addView(input, new LinearLayout.LayoutParams(0, -1, 1f));
+
+        clearBtn = Ui.iconButton(act, IconDrawable.CLOSE, 0, M3.onSurfaceVariant, 40, 20,
+                () -> input.setText(""));
+        clearBtn.setVisibility(View.GONE);
+        bar.addView(clearBtn, new LinearLayout.LayoutParams(M3.dp(40), M3.dp(40)));
+
+        input.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
+            @Override public void onTextChanged(CharSequence s, int a, int b, int c) { }
+            @Override public void afterTextChanged(Editable s) {
+                clearBtn.setVisibility(s.length() > 0 ? View.VISIBLE : View.GONE);
+            }
+        });
+        input.setOnEditorActionListener((v, id, ev) -> {
+            if (id == EditorInfo.IME_ACTION_SEARCH) {
+                submit(v.getText().toString().trim());
+                return true;
+            }
+            return false;
+        });
+        header.addView(bar, Ui.lp(-1, M3.dp(56), 0, M3.dp(10), 0, 0));
+        root.addView(header, new LinearLayout.LayoutParams(-1, -2));
+
+        FrameLayout content = new FrameLayout(act);
+        feed = new FeedView(act, host);
+        feed.setVisibility(View.GONE);
+        content.addView(feed, new FrameLayout.LayoutParams(-1, -1));
+
+        hint = M3.text(act, "Ketik kata kunci lalu tekan Cari di keyboard.", 15, M3.onSurfaceVariant, false);
+        hint.setGravity(Gravity.CENTER);
+        content.addView(hint, new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER));
+
+        root.addView(content, new LinearLayout.LayoutParams(-1, 0, 1f));
+    }
+
+    /** Tab Cari ditekan: fokus ke kolom pencarian dan tampilkan keyboard. */
+    public void focusInput() {
+        input.requestFocus();
+        InputMethodManager imm = (InputMethodManager) act.getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null) imm.showSoftInput(input, 0);
+    }
+
+    private void submit(String q) {
+        hideKeyboard();
+        input.clearFocus();
+        if (q.isEmpty()) return;
+        hint.setVisibility(View.GONE);
+        feed.setVisibility(View.VISIBLE);
+        feed.search(q);
+    }
+
+    private void hideKeyboard() {
+        InputMethodManager imm = (InputMethodManager) act.getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null) imm.hideSoftInputFromWindow(input.getWindowToken(), 0);
+    }
+
+    @Override public View getView() { return root; }
+
+    @Override public void onShown() { }
+
+    @Override public void onHidden() { hideKeyboard(); }
+
+    @Override public void setInsets(int top, int bottom, int left, int right) {
+        header.setPadding(M3.dp(16) + left, top + M3.dp(8), M3.dp(16) + right, 0);
+        feed.setInsets(left, right, bottom);
+    }
+}
