@@ -11,7 +11,6 @@ import android.view.Gravity;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import com.pinpic.app.Account;
 import com.pinpic.app.CropImageView;
@@ -86,7 +85,7 @@ public final class AvatarCropActivity extends Activity {
             final Bitmap bmp = decode(uri);
             runOnUiThread(() -> {
                 if (bmp == null) {
-                    Toast.makeText(this, "Gambar tidak bisa dibuka", Toast.LENGTH_SHORT).show();
+                    M3.toast(this, "Gambar tidak bisa dibuka");
                     finish();
                 } else {
                     crop.setImage(bmp);
@@ -102,7 +101,7 @@ public final class AvatarCropActivity extends Activity {
         crop.doCrop();                 // memanggil onCropReady (sinkron) bila area valid
         if (!handed) {
             saving = false;
-            Toast.makeText(this, "Gambar belum siap", Toast.LENGTH_SHORT).show();
+            M3.toast(this, "Gambar belum siap");
         } else {
             save.setAlpha(0.4f);
         }
@@ -113,13 +112,13 @@ public final class AvatarCropActivity extends Activity {
             final boolean ok = Account.saveAvatar(AvatarCropActivity.this, bmp);
             runOnUiThread(() -> {
                 if (ok) {
-                    Toast.makeText(AvatarCropActivity.this, "Foto profil disimpan", Toast.LENGTH_SHORT).show();
+                    M3.toast(AvatarCropActivity.this, "Foto profil disimpan");
                     setResult(RESULT_OK);
                     finish();
                 } else {
                     saving = false;
                     save.setAlpha(1f);
-                    Toast.makeText(AvatarCropActivity.this, "Gagal menyimpan foto", Toast.LENGTH_SHORT).show();
+                    M3.toast(AvatarCropActivity.this, "Gagal menyimpan foto");
                 }
             });
         }).start();

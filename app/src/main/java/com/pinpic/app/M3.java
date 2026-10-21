@@ -20,6 +20,7 @@ public final class M3 {
     public static int background, surfaceContainerHigh, onSurface, onSurfaceVariant, outline;
     public static int scrim = 0x99000000, inverseSurface, inverseOnSurface;
     private static float density = 1f;
+    private static boolean inited;
 
     public static void init(Context c) {
         density = c.getResources().getDisplayMetrics().density;
@@ -50,6 +51,7 @@ public final class M3 {
         }
         inverseSurface = onSurface;
         inverseOnSurface = background;
+        inited = true;
     }
 
     public static int dp(float v) { return Math.round(v * density); }
@@ -98,5 +100,35 @@ public final class M3 {
         // DEFAULT_BOLD/DEFAULT (bukan Typeface.create) supaya gaya tebal tetap terbawa oleh FontManager.
         t.setTypeface(bold ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
         return t;
+    }
+
+    /**
+     * Jarak toast dari bawah layar (dp). Toast sistem sudah otomatis naik di atas navigation bar,
+     * jadi posisi ini sama dengan snackbar "Gambar dihapus" (100dp di atas navigasi).
+     */
+    private static final int TOAST_BOTTOM_DP = 100;
+
+    /**
+     * Toast bawaan Android (mengambang, muncul di atas navigasi) dengan tampilan custom bergaya M3:
+     * kartu inverse surface, sudut membulat, teks inverse on surface. Dipakai di semua activity.
+     */
+    public static void toast(Context c, CharSequence msg) {
+        if (!inited) init(c);
+        Context app = c.getApplicationContext();
+
+        TextView t = new TextView(app);
+        t.setText(msg);
+        t.setTextSize(14);
+        t.setTextColor(inverseOnSurface);
+        t.setTypeface(Typeface.DEFAULT);
+        t.setPadding(dp(20), dp(14), dp(20), dp(14));
+        t.setBackground(shape(inverseSurface, 16));
+        t.setElevation(dp(10));
+
+        android.widget.Toast toast = new android.widget.Toast(app);
+        toast.setView(t);
+        toast.setDuration(android.widget.Toast.LENGTH_SHORT);
+        toast.setGravity(android.view.Gravity.BOTTOM | android.view.Gravity.CENTER_HORIZONTAL, 0, dp(TOAST_BOTTOM_DP));
+        toast.show();
     }
 }

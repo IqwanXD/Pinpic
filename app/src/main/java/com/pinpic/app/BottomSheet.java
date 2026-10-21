@@ -15,7 +15,7 @@ import android.widget.LinearLayout;
  * - Panel punya elevation lebih tinggi dari navigasi, jadi selalu menimpa navigasi.
  * - Bayangan gelap di atas tepi panel menandai batas bawah area scroll.
  */
-final class BottomSheet extends FrameLayout {
+public final class BottomSheet extends FrameLayout {
 
     interface Listener {
         /** Dipanggil saat sheet mulai ditutup (animasi keluar dimulai). */
@@ -29,7 +29,7 @@ final class BottomSheet extends FrameLayout {
     private boolean closing;
     private Listener listener;
 
-    static BottomSheet show(ViewGroup root, int bottomInset, View content) {
+    public static BottomSheet show(ViewGroup root, int bottomInset, View content) {
         BottomSheet s = new BottomSheet(root.getContext(), bottomInset, content);
         root.addView(s, new FrameLayout.LayoutParams(-1, -1));
         s.open();
@@ -108,9 +108,9 @@ final class BottomSheet extends FrameLayout {
         });
     }
 
-    boolean isOpen() { return getParent() != null && !closing; }
+    public boolean isOpen() { return getParent() != null && !closing; }
 
-    void dismiss() {
+    public void dismiss() {
         if (closing) return;
         closing = true;
         if (listener != null) listener.onClosing();

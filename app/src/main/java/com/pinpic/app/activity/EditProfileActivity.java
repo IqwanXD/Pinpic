@@ -13,7 +13,6 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import com.pinpic.app.Account;
 import com.pinpic.app.FontManager;
@@ -154,7 +153,7 @@ public final class EditProfileActivity extends Activity {
         try {
             startActivityForResult(Intent.createChooser(i, "Pilih foto profil"), REQ_PICK);
         } catch (Exception e) {
-            Toast.makeText(this, "Tidak ada aplikasi galeri", Toast.LENGTH_SHORT).show();
+            M3.toast(this, "Tidak ada aplikasi galeri");
         }
     }
 
@@ -191,7 +190,7 @@ public final class EditProfileActivity extends Activity {
     private void saveProfile() {
         Prefs.setName(nameIn.getText().trim());
         Prefs.setBio(bioIn.getText().trim());
-        Toast.makeText(this, "Profil disimpan", Toast.LENGTH_SHORT).show();
+        M3.toast(this, "Profil disimpan");
         setResult(RESULT_OK);
         finish();
     }

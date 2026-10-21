@@ -117,7 +117,7 @@ public class SketchwareUtil {
             _intent.putExtra("return-data", false);
             _activity.startActivityForResult(_intent, _requestCode);
         } catch (ActivityNotFoundException _e) {
-            Toast.makeText(_activity, "Your device doesn't support the crop action!", Toast.LENGTH_SHORT).show();
+            M3.toast(_activity, "Your device doesn't support the crop action!");
         }
     }
 
@@ -154,7 +154,7 @@ public class SketchwareUtil {
     }
 
     public static void showMessage(Context _context, String _s) {
-        Toast.makeText(_context, _s, Toast.LENGTH_SHORT).show();
+        M3.toast(_context, _s);
     }
     public static int getLocationX(View _view) {
         int _location[] = new int[2];

@@ -20,7 +20,6 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
-import android.widget.Toast;
 
 /**
  * Pengaturan. Desain mengikuti SettingActivity di JetEditor: judul besar yang mengecil
@@ -62,7 +61,7 @@ public class SettingsActivity extends Activity {
         addBlock(card(
                 actionRow(R.drawable.ic_delete, "Hapus cache gambar", "Kosongkan gambar yang tersimpan sementara", v -> {
                     ImageLoader.clear();
-                    Toast.makeText(this, "Cache gambar dihapus", Toast.LENGTH_SHORT).show();
+                    M3.toast(this, "Cache gambar dihapus");
                 }),
                 folderRow(),
                 infoRow(R.drawable.ic_info, "Versi", versionName())));
@@ -291,7 +290,7 @@ public class SettingsActivity extends Activity {
         row.setOnLongClickListener(v -> {
             Prefs.setDownloadTree(null);
             folderSub.setText(Downloader.locationLabel());
-            Toast.makeText(this, "Kembali ke Pictures/Pinpic", Toast.LENGTH_SHORT).show();
+            M3.toast(this, "Kembali ke Pictures/Pinpic");
             return true;
         });
         return row;
@@ -306,7 +305,7 @@ public class SettingsActivity extends Activity {
         try {
             startActivityForResult(i, REQ_FOLDER);
         } catch (ActivityNotFoundException e) {
-            Toast.makeText(this, "Pengelola file tidak ditemukan di perangkat", Toast.LENGTH_SHORT).show();
+            M3.toast(this, "Pengelola file tidak ditemukan di perangkat");
         }
     }
 
@@ -320,12 +319,12 @@ public class SettingsActivity extends Activity {
             getContentResolver().takePersistableUriPermission(tree,
                     Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
         } catch (SecurityException e) {
-            Toast.makeText(this, "Folder ini tidak bisa dipakai", Toast.LENGTH_SHORT).show();
+            M3.toast(this, "Folder ini tidak bisa dipakai");
             return;
         }
         Prefs.setDownloadTree(tree.toString());
         folderSub.setText(Downloader.locationLabel());
-        Toast.makeText(this, "Lokasi unduhan diubah", Toast.LENGTH_SHORT).show();
+        M3.toast(this, "Lokasi unduhan diubah");
     }
 
     private String versionName() {

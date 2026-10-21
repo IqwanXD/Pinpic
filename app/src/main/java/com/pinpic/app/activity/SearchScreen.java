@@ -3,7 +3,6 @@ package com.pinpic.app.activity;
 import android.app.Activity;
 import android.content.Context;
 import android.graphics.Color;
-import android.graphics.drawable.ColorDrawable;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.Editable;
@@ -18,11 +17,11 @@ import android.graphics.drawable.GradientDrawable;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
-import android.widget.PopupWindow;
 import android.widget.TextView;
 
 import com.pinpic.app.IconDrawable;
 import com.pinpic.app.M3;
+import com.pinpic.app.Prefs;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -61,8 +60,10 @@ public final class SearchScreen implements Screen {
     private final View clearBtn;
     private final TextView hint;
     private final FeedView feed;
-    private final PopupWindow popup;
     private final LinearLayout suggestList;
+    private final FrameLayout.LayoutParams suggestLp;
+    /** Baris saran dibuat sekali; saat mengetik hanya teksnya yang diganti (tidak ada kedip). */
+    private final TextView[] suggestTexts = new TextView[SUGGEST_COUNT];
     private EditText input;
 
     public SearchScreen(Activity act, ScreenHost host) {
@@ -138,39 +139,46 @@ public final class SearchScreen implements Screen {
 
         root.addView(content, new LinearLayout.LayoutParams(-1, 0, 1f));
 
-        // Popup saran: mengambang di bawah kolom pencarian (gaya YouTube).
-        // Tidak bisa fokus, jadi keyboard tetap di kolom pencarian.
+        // Saran: kartu mengambang di atas daftar, tepat di bawah kolom pencarian (gaya YouTube).
+        // Ini view biasa (bukan PopupWindow), jadi tidak ikut terlepas dari window saat mengetik.
         suggestList = new LinearLayout(act);
         suggestList.setOrientation(LinearLayout.VERTICAL);
         suggestList.setPadding(0, M3.dp(6), 0, M3.dp(6));
         suggestList.setBackground(M3.shape(M3.surfaceContainerHigh, 16));
-        popup = new PopupWindow(suggestList, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        popup.setFocusable(false);
-        popup.setOutsideTouchable(true);
-        popup.setInputMethodMode(PopupWindow.INPUT_METHOD_NOT_NEEDED);
-        popup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-        popup.setElevation(M3.dp(8));
+        suggestList.setElevation(M3.dp(8));
+        suggestList.setVisibility(View.GONE);
+        for (int i = 0; i < SUGGEST_COUNT; i++) suggestList.addView(suggestRow(i));
+        suggestLp = new FrameLayout.LayoutParams(-1, -2, Gravity.TOP);
+        suggestLp.leftMargin = M3.dp(16);
+        suggestLp.rightMargin = M3.dp(16);
+        content.addView(suggestList, suggestLp);
     }
 
-    /** Saran dibuat dari teks user, misalnya "kucing" menjadi "kucing lucu" atau "kucing HD". */
+    /**
+     * Saran dibuat dari teks user, misalnya "kucing" menjadi "kucing lucu" atau "kucing HD".
+     * Saat pertama muncul saja popup dianimasikan. Selama input berisi teks, setiap perubahan
+     * hanya mengganti teks barisnya. Popup disembunyikan hanya ketika input kosong.
+     */
     private void updateSuggestions(String typed) {
-        if (typed.isEmpty() || bar.getWidth() <= 0) {
+        if (typed.isEmpty()) {
             dismissSuggestions();
             return;
         }
-        suggestList.removeAllViews();
         List<String> pool = new ArrayList<>(Arrays.asList(MODIFIERS));
         Collections.shuffle(pool, rnd);
         for (int i = 0; i < SUGGEST_COUNT && i < pool.size(); i++) {
-            suggestList.addView(suggestRow(typed + " " + pool.get(i)));
+            suggestTexts[i].setText(typed + " " + pool.get(i));
         }
-        int w = bar.getWidth();
-        popup.setWidth(w);
-        if (popup.isShowing()) popup.update(bar, 0, M3.dp(6), w, ViewGroup.LayoutParams.WRAP_CONTENT);
-        else popup.showAsDropDown(bar, 0, M3.dp(6));
+        if (suggestList.getVisibility() == View.VISIBLE) return; // sudah tampil: cukup ganti teks
+
+        suggestList.setVisibility(View.VISIBLE);
+        suggestList.animate().cancel();
+        suggestList.setAlpha(0f);
+        suggestList.setTranslationY(-M3.dp(8));
+        suggestList.animate().alpha(1f).translationY(0f).setDuration(180).start();
     }
 
-    private View suggestRow(final String s) {
+    private View suggestRow(final int idx) {
         LinearLayout row = new LinearLayout(act);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -178,11 +186,13 @@ public final class SearchScreen implements Screen {
         row.setBackground(M3.ripple(0, 0));
         row.addView(Ui.icon(act, IconDrawable.SEARCH, M3.onSurfaceVariant),
                 new LinearLayout.LayoutParams(M3.dp(20), M3.dp(20)));
-        TextView t = M3.text(act, s, 15, M3.onSurface, false);
+        TextView t = M3.text(act, "", 15, M3.onSurface, false);
+        suggestTexts[idx] = t;
         LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(0, -2, 1f);
         tl.leftMargin = M3.dp(16);
         row.addView(t, tl);
         row.setOnClickListener(v -> {
+            String s = t.getText().toString();
             input.setText(s);
             input.setSelection(s.length());
             submit(s);
@@ -191,7 +201,10 @@ public final class SearchScreen implements Screen {
     }
 
     private void dismissSuggestions() {
-        if (popup.isShowing()) popup.dismiss();
+        suggestList.animate().cancel();
+        suggestList.setAlpha(1f);
+        suggestList.setTranslationY(0f);
+        suggestList.setVisibility(View.GONE);
     }
 
     private void submit(String q) {
@@ -201,6 +214,7 @@ public final class SearchScreen implements Screen {
         if (q.isEmpty()) return;
         hint.setVisibility(View.GONE);
         feed.setVisibility(View.VISIBLE);
+        Prefs.recordSearch(q);
         feed.search(q);
     }
 
@@ -221,6 +235,9 @@ public final class SearchScreen implements Screen {
 
     @Override public void setInsets(int top, int bottom, int left, int right) {
         header.setPadding(M3.dp(16) + left, top + M3.dp(8), M3.dp(16) + right, 0);
+        suggestLp.leftMargin = M3.dp(16) + left;
+        suggestLp.rightMargin = M3.dp(16) + right;
+        suggestList.setLayoutParams(suggestLp);
         feed.setInsets(left, right, bottom);
     }
 }

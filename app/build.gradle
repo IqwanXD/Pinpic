@@ -2,13 +2,9 @@ plugins {
 	id 'com.android.application'
 }
 
-// Signing: if KEYSTORE_PATH is set (CI secrets), the release APK uses that key.
-// Otherwise it falls back to the debug key so the release APK is always installable.
-def ksPath = System.getenv("KEYSTORE_PATH")
-
 android {
 	compileSdk 34
-
+	
 	defaultConfig {
 		applicationId "com.pinpic.app"
 		namespace "com.pinpic.app"
@@ -17,24 +13,10 @@ android {
 		versionCode 2012
 		versionName "0.12"
 	}
-
-	signingConfigs {
-		if (ksPath) {
-			release {
-				storeFile file(ksPath)
-				storePassword System.getenv("KEYSTORE_PASSWORD")
-				keyAlias System.getenv("KEY_ALIAS")
-				keyPassword System.getenv("KEY_PASSWORD")
-			}
-		}
-	}
-
+	
 	buildTypes {
 		release {
-			// Lightweight release: R8 shrinking + unused resource removal
-			minifyEnabled true
-			shrinkResources true
-			signingConfig ksPath ? signingConfigs.release : signingConfigs.debug
+			minifyEnabled false
 			proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
 		}
 	}

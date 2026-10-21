@@ -9,14 +9,13 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import com.pinpic.app.ZoomImageView;
 import com.pinpic.app.IconDrawable;
 import com.pinpic.app.ImageLoader;
 import com.pinpic.app.M3;
 import com.pinpic.app.Pin;
 
 import java.util.concurrent.Future;
-
-import ru.inoui.ZoomImageView;
 
 /**
  * Halaman detail gambar ala Pinterest, dalam satu scroll:

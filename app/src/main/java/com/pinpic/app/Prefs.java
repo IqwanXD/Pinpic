@@ -3,6 +3,15 @@ package com.pinpic.app;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Locale;
+
 /** Pengaturan kecil, disimpan di SharedPreferences "pinpic". */
 public final class Prefs {
     private static SharedPreferences sp;
@@ -13,6 +22,7 @@ public final class Prefs {
     private static final String DEFAULT_ON = "pinterest";
 
     public static void init(Context c) {
+        SeenHistory.init(c);
         if (sp != null) return;
         sp = c.getApplicationContext().getSharedPreferences("pinpic", Context.MODE_PRIVATE);
         // Default baru: hanya Pinterest yang aktif. Pilihan lama di-reset sekali saja.
@@ -71,5 +81,46 @@ public final class Prefs {
 
     public static void setBio(String v) {
         if (sp != null) sp.edit().putString("profile_bio", v).apply();
+    }
+
+    private static final String KW_COUNTS = "kw_counts";
+    private static final int KW_MAX = 100;
+
+    /** Catat satu pencarian dari kolom Cari. Dipakai untuk rekomendasi beranda. */
+    public static void recordSearch(String q) {
+        if (sp == null || q == null) return;
+        String k = q.trim().toLowerCase(Locale.ROOT);
+        if (k.isEmpty() || k.length() > 60) return;
+        try {
+            JSONObject o = new JSONObject(sp.getString(KW_COUNTS, "{}"));
+            o.put(k, o.optInt(k, 0) + 1);
+            if (o.length() > KW_MAX) {
+                String weakest = null;
+                int min = Integer.MAX_VALUE;
+                Iterator<String> it = o.keys();
+                while (it.hasNext()) {
+                    String key = it.next();
+                    int v = o.optInt(key, 0);
+                    if (v < min) { min = v; weakest = key; }
+                }
+                if (weakest != null) o.remove(weakest);
+            }
+            sp.edit().putString(KW_COUNTS, o.toString()).apply();
+        } catch (JSONException ignored) { }
+    }
+
+    /** Kata kunci yang paling sering dicari (terbanyak dulu). */
+    public static List<String> topKeywords(int n) {
+        List<String> out = new ArrayList<>();
+        if (sp == null) return out;
+        try {
+            final JSONObject o = new JSONObject(sp.getString(KW_COUNTS, "{}"));
+            List<String> keys = new ArrayList<>();
+            Iterator<String> it = o.keys();
+            while (it.hasNext()) keys.add(it.next());
+            Collections.sort(keys, (a, b) -> Integer.compare(o.optInt(b, 0), o.optInt(a, 0)));
+            for (int i = 0; i < keys.size() && out.size() < n; i++) out.add(keys.get(i));
+        } catch (JSONException ignored) { }
+        return out;
     }
 }

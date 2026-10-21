@@ -284,12 +284,18 @@ public final class ProfileScreen implements Screen {
         @Override public View getView(int pos, View convert, ViewGroup parent) {
             final Downloader.Saved s = items.get(pos);
             final ImageView iv = convert instanceof ImageView ? (ImageView) convert : createTile();
-            iv.setImageDrawable(null);
+            // Muat ulang gambar hanya bila tile ini sebelumnya menampilkan gambar lain.
+            // Tanpa ini setiap ketuk pilihan mengosongkan dan memuat ulang semua tile (kedip).
+            Object prev = iv.getTag();
+            boolean same = prev instanceof Downloader.Saved && ((Downloader.Saved) prev).uri.equals(s.uri);
             iv.setTag(s);
             iv.setForeground(selected.contains(s.uri.toString()) ? selectedOverlay() : null);
-            ImageLoader.loadUri(act, s.uri, tileW, bmp -> {
-                if (bmp != null && iv.getTag() == s) iv.setImageBitmap(bmp);
-            });
+            if (!same) {
+                iv.setImageDrawable(null);
+                ImageLoader.loadUri(act, s.uri, tileW, bmp -> {
+                    if (bmp != null && iv.getTag() == s) iv.setImageBitmap(bmp);
+                });
+            }
             iv.setOnClickListener(v -> {
                 if (selecting) toggle(s);
                 else openViewer(s);
