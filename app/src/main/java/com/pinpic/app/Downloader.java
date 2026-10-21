@@ -113,6 +113,15 @@ public final class Downloader {
         }).start();
     }
 
+    /**
+     * Akses file langsung: Android 11+ dengan MANAGE_EXTERNAL_STORAGE (bisa menulis dan menghapus
+     * file apa pun di Pictures/Pinpic), atau Android 9 ke bawah. Android 10 memakai MediaStore.
+     */
+    static boolean fileAccess() {
+        if (Build.VERSION.SDK_INT >= 30) return Environment.isExternalStorageManager();
+        return Build.VERSION.SDK_INT < 29;
+    }
+
     /** Daftar gambar hasil unduhan, terbaru dulu. Panggil dari background thread. */
     public static List<Saved> listSaved(Context ctx) {
         List<Saved> all = listAll(ctx);
@@ -141,7 +150,7 @@ public final class Downloader {
     private static List<Saved> listDefault(Context ctx) {
         List<Saved> out = new ArrayList<>();
         try {
-            if (Build.VERSION.SDK_INT >= 29) {
+            if (!fileAccess() && Build.VERSION.SDK_INT >= 29) {
                 Uri coll = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
                 String[] proj = {MediaStore.Images.Media._ID, MediaStore.Images.Media.DISPLAY_NAME,
                         MediaStore.Images.Media.DATE_ADDED};
@@ -205,7 +214,7 @@ public final class Downloader {
         String tree = Prefs.downloadTree();
         if (existsAnywhere(ctx, tree, name)) return false;   // sudah ada: jangan disimpan dua kali
         if (tree != null) return writeTree(ctx, Uri.parse(tree), name, mime, d);
-        if (Build.VERSION.SDK_INT >= 29) return writeMedia(ctx, name, mime, d);
+        if (!fileAccess() && Build.VERSION.SDK_INT >= 29) return writeMedia(ctx, name, mime, d);
         return writeFile(ctx, name, mime, d);
     }
 

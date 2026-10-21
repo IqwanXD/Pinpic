@@ -35,6 +35,8 @@ import java.util.List;
  * Tombol titik tiga di kanan atas membuka menu: Hapus (lewat bottom sheet), Bagikan, Jadikan wallpaper.
  */
 public class ImageViewerActivity extends Activity {
+    /** Extra boolean: true bila yang dibuka adalah foto profil (bukan gambar galeri). Menu tidak ditampilkan. */
+    public static final String EXTRA_AVATAR = "avatar";
 
     private static final long SLIDE_MS = 220;
     private static final float COMMIT_FRACTION = 0.25f;
@@ -105,6 +107,8 @@ public class ImageViewerActivity extends Activity {
         ml.rightMargin = M3.dp(12);
         ml.topMargin = M3.dp(12);
         pager.addView(more, ml);
+        final boolean avatar = getIntent().getBooleanExtra(EXTRA_AVATAR, false);
+        if (avatar) more.setVisibility(android.view.View.GONE);
 
         // Tombol mengikuti inset sistem supaya tidak tertutup status bar
         pager.setOnApplyWindowInsetsListener((v, ins) -> {
@@ -128,11 +132,14 @@ public class ImageViewerActivity extends Activity {
         pager.showFirst(uri);
 
         // Daftar gambar unduhan (urut seperti galeri Saya) dimuat di background, lalu geser bisa dipakai
-        final Context app = getApplicationContext();
-        new Thread(() -> {
-            final List<Downloader.Saved> list = Downloader.listSaved(app);
-            runOnUiThread(() -> pager.setSaved(list, uri));
-        }).start();
+        // Foto profil tidak ada di galeri, jadi tidak perlu daftar.
+        if (!avatar) {
+            final Context app = getApplicationContext();
+            new Thread(() -> {
+                final List<Downloader.Saved> list = Downloader.listSaved(app);
+                runOnUiThread(() -> pager.setSaved(list, uri));
+            }).start();
+        }
     }
 
     private ZoomImageView newPage(Uri u) {

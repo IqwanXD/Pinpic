@@ -9,6 +9,7 @@ import android.graphics.Paint;
 import android.graphics.Region;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.os.Build;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
@@ -60,13 +61,14 @@ public class InoInputLayout extends RelativeLayout {
 		editText = new EditText(context);
 		editText.setId(idEditTextPath);
 		editText.setTextSize(14);
-		editText.setTextColor(Color.WHITE);
+		editText.setTextColor(M3.onSurface);
 		
 		editText.setSingleLine(false);
 		editText.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
 		editText.setGravity(Gravity.TOP | Gravity.START);
 		
 		editText.setBackgroundColor(Color.TRANSPARENT);
+		tintCursor(editText);
 		
 		int verticalPadding = (int)(16 * dp);
 		int horizontalPadding = (int)(16 * dp);
@@ -248,6 +250,35 @@ public class InoInputLayout extends RelativeLayout {
 	// ==========================================
 	
 	// Get komponen inti jika butuh memodifikasi properti bawaan dasar lainnya
+	/**
+	 * Kursor, pegangan seleksi, dan sorotan teks memakai warna aksen aplikasi (M3.primary),
+	 * bukan warna aksen sistem/dynamic color perangkat yang dipakai EditText secara default.
+	 */
+	public static void tintCursor(EditText e) {
+		e.setHighlightColor(M3.alpha(M3.primary, 0.35f));
+		if (Build.VERSION.SDK_INT < 29) return;   // API di bawah 29 tidak punya setter kursor/pegangan
+		float dp = e.getResources().getDisplayMetrics().density;
+
+		GradientDrawable cursor = new GradientDrawable();
+		cursor.setColor(M3.primary);
+		cursor.setCornerRadius(dp);
+		cursor.setSize(Math.round(2 * dp), Math.round(22 * dp));
+		e.setTextCursorDrawable(cursor);
+
+		int d = Math.round(18 * dp);
+		e.setTextSelectHandleLeft(handle(d));
+		e.setTextSelectHandleRight(handle(d));
+		e.setTextSelectHandle(handle(d));
+	}
+
+	private static GradientDrawable handle(int size) {
+		GradientDrawable g = new GradientDrawable();
+		g.setShape(GradientDrawable.OVAL);
+		g.setColor(M3.primary);
+		g.setSize(size, size);
+		return g;
+	}
+
 	public EditText getEditText() { return editText; }
 	public TextView getLabelTextView() { return labelTextView; }
 	

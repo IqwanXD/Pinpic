@@ -7,14 +7,26 @@ import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Insets;
 import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
+import android.graphics.drawable.Drawable;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
+import android.view.animation.DecelerateInterpolator;
+import android.view.Window;
+import android.view.WindowInsets;
+import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -28,34 +40,58 @@ import android.widget.TextView;
 public class SettingsActivity extends Activity {
 
     private static final float END_SCALE = 18f / 34f;   // 34sp mengecil jadi 18sp
-    private static final int C_DIVIDER = 0x22FFFFFF;
-    private static final int C_RIPPLE = 0x33FFFFFF;
     private static final int REQ_FOLDER = 41;
+    /** Warna aksen bawaan, dipakai saat belum pernah memilih warna sendiri. */
+    private static final int DEFAULT_ACCENT = 0xFFD0BCFF;
+    private static final String KEY_SCROLL = "scrollY";
 
     private int expandedH, collapsedH, maxScroll, lastY;
+    private int topInset, bottomInset;   // inset sistem: status bar dan navigasi
     private FrameLayout header;
+    private FrameLayout rootFrame;   // tempat bottom sheet pemilih warna
+    /** Jeda minimum antar pembangunan ulang tema saat ketukan beruntun (ms). Ketukan pertama langsung diproses. */
+    private static final long THEME_STEP_MS = 120;
+    private long lastThemeAt;
+    private View backBtn;
     private TextView title;
     private LinearLayout col;
     private TextView folderSub;
+    private ScrollView scroll;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         Prefs.init(this);
         M3.init(this);
-        getWindow().setStatusBarColor(M3.background);
-        getWindow().setNavigationBarColor(M3.background);
+        final int restoreY = savedInstanceState == null ? 0 : savedInstanceState.getInt(KEY_SCROLL, 0);
+        buildScreen(restoreY, null);
+    }
 
-        expandedH = M3.dp(176);
-        collapsedH = M3.dp(56);
-        maxScroll = expandedH - collapsedH;
+    /**
+     * Bangun seluruh isi layar. Dipakai saat pertama dibuka dan saat tema/warna berubah.
+     * Saat tema berubah layar TIDAK di-recreate (itu yang membuat layar berkedip, scroll lompat
+     * ke atas, dan saklar mulai dari OFF): isinya dibangun ulang di tempat, posisi scroll
+     * dipulihkan sebelum frame pertama digambar, dan tampilan lama (snapshot) dipudarkan perlahan.
+     *
+     * @param restoreY posisi scroll yang dipulihkan (0 = dari atas)
+     * @param snapshot gambar tampilan lama untuk crossfade, atau null
+     */
+    private void buildScreen(final int restoreY, Bitmap snapshot) {
+        // Tinggi area tampil sebelumnya: dipakai agar rentang scroll sudah benar di layout pertama.
+        final int viewportH = rootFrame != null ? rootFrame.getHeight() : 0;
+
+        computeHeights();
 
         col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
-        col.setPadding(M3.dp(16), expandedH, M3.dp(16), M3.dp(24));
+        col.setPadding(M3.dp(16), expandedH, M3.dp(16), bottomInset + M3.dp(24));
+        if (viewportH > 0) col.setMinimumHeight(viewportH + maxScroll);
 
         addBlock(section("Sumber pencarian"));
         addBlock(sourcesCard());
+
+        addBlock(section("Tampilan"));
+        addBlock(displayCard());
 
         addBlock(section("Umum"));
         addBlock(card(
@@ -67,28 +103,150 @@ public class SettingsActivity extends Activity {
                 infoRow(R.drawable.ic_info, "Versi", versionName())));
 
         // Konten mulai di bawah header (lewat padding atas konten, bukan padding ScrollView).
-        ScrollView scroll = new ScrollView(this);
-        scroll.setVerticalScrollBarEnabled(false);
-        scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        scroll.addView(col);
+        final ScrollView sv = new ScrollView(this);
+        scroll = sv;
+        sv.setVerticalScrollBarEnabled(false);
+        sv.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        sv.addView(col);
         // Daftar pendek tetap bisa di-scroll sejauh maxScroll agar header bisa mengecil.
-        scroll.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+        sv.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
             int min = (b - t) + maxScroll;
             if (col.getMinimumHeight() != min) col.setMinimumHeight(min);
         });
-        scroll.setOnScrollChangeListener((v, x, y, ox, oy) -> collapse(y));
+        sv.setOnScrollChangeListener((v, x, y, ox, oy) -> collapse(y));
 
         header = buildHeader();
 
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(M3.background);
-        root.setFitsSystemWindows(true);   // ruang untuk status bar & navigasi sistem
-        root.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
+        root.addView(sv, new FrameLayout.LayoutParams(-1, -1));
         root.addView(header, new FrameLayout.LayoutParams(-1, expandedH, Gravity.TOP));
+        root.setOnApplyWindowInsetsListener((v, ins) -> {
+            if (Build.VERSION.SDK_INT >= 30) {
+                Insets i = ins.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                topInset = i.top;
+                bottomInset = i.bottom;
+            } else {
+                topInset = ins.getSystemWindowInsetTop();
+                bottomInset = ins.getSystemWindowInsetBottom();
+            }
+            applyInsets();
+            return ins;
+        });
 
+        rootFrame = root;
         setContentView(root);
+        // Window di-set SETELAH setContentView, sama urutannya dengan MainActivity.
+        // Sebelumnya dipasang sebelum setContentView, dan bar navigasi masih kena scrim di beberapa perangkat.
+        setupEdgeToEdge();
         FontManager.attach(root);
-        collapse(0);
+        collapse(restoreY);
+
+        // Pulihkan posisi scroll SEBELUM frame pertama digambar, jadi tidak ada lompatan.
+        if (restoreY > 0) {
+            sv.getViewTreeObserver().addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener() {
+                @Override public boolean onPreDraw() {
+                    sv.getViewTreeObserver().removeOnPreDrawListener(this);
+                    sv.scrollTo(0, restoreY);
+                    collapse(restoreY);
+                    return true;
+                }
+            });
+        }
+
+        // Tampilan lama dipudarkan di atas tampilan baru: perubahan warna terasa halus.
+        if (snapshot != null) fadeOutSnapshot(root, snapshot);
+    }
+
+    private void fadeOutSnapshot(final FrameLayout host, final Bitmap bmp) {
+        final ImageView cover = new ImageView(this);
+        cover.setImageBitmap(bmp);
+        cover.setScaleType(ImageView.ScaleType.FIT_XY);
+        host.addView(cover, new FrameLayout.LayoutParams(-1, -1));
+        cover.animate().alpha(0f).setDuration(220)
+                .setInterpolator(new DecelerateInterpolator(1.5f))
+                .withEndAction(() -> {
+                    host.removeView(cover);
+                    cover.setImageDrawable(null);
+                    bmp.recycle();
+                }).start();
+    }
+
+    /** Hentikan ripple/pressed di seluruh pohon view dan langsung loncat ke kondisi akhir. */
+    private void endRipples(View v) {
+        if (v == null) return;
+        Drawable bg = v.getBackground();
+        if (bg instanceof RippleDrawable) {
+            v.setPressed(false);
+            v.setHovered(false);
+            bg.setState(new int[0]);
+            bg.jumpToCurrentState();
+        }
+        if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) endRipples(g.getChildAt(i));
+        }
+    }
+
+    /** Ambil gambar tampilan sekarang, atau null kalau belum bisa. */
+    private Bitmap snapshotOf(View v) {
+        if (v == null || v.getWidth() <= 0 || v.getHeight() <= 0) return null;
+        try {
+            Bitmap b = Bitmap.createBitmap(v.getWidth(), v.getHeight(), Bitmap.Config.ARGB_8888);
+            v.draw(new Canvas(b));
+            return b;
+        } catch (OutOfMemoryError e) {
+            return null;
+        }
+    }
+
+    @Override protected void onSaveInstanceState(Bundle out) {
+        super.onSaveInstanceState(out);
+        out.putInt(KEY_SCROLL, lastY);
+    }
+
+    /** Edge-to-edge sama persis dengan MainActivity.setupEdgeToEdge: window penuh, bar sistem transparan. */
+    private void setupEdgeToEdge() {
+        Window w = getWindow();
+        w.setBackgroundDrawable(new ColorDrawable(M3.background));
+        w.setStatusBarColor(Color.TRANSPARENT);
+        w.setNavigationBarColor(Color.TRANSPARENT);
+        if (Build.VERSION.SDK_INT >= 29) {
+            w.setNavigationBarContrastEnforced(false);
+            w.setStatusBarContrastEnforced(false);
+        }
+        if (Build.VERSION.SDK_INT >= 28) {
+            WindowManager.LayoutParams lp = w.getAttributes();
+            lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            w.setAttributes(lp);
+        }
+        if (Build.VERSION.SDK_INT >= 30) {
+            w.setDecorFitsSystemWindows(false);
+        } else {
+            w.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+        }
+        M3.styleBars(w);
+    }
+
+    /** Tinggi header memperhitungkan status bar, supaya judul dan tombol kembali tidak tertutup. */
+    private void computeHeights() {
+        expandedH = topInset + M3.dp(176);
+        collapsedH = topInset + M3.dp(56);
+        maxScroll = expandedH - collapsedH;
+    }
+
+    /** Dipanggil saat inset sistem diketahui: atur ulang padding konten dan posisi header. */
+    private void applyInsets() {
+        computeHeights();
+        if (col != null) col.setPadding(M3.dp(16), expandedH, M3.dp(16), bottomInset + M3.dp(24));
+        if (backBtn != null) {
+            FrameLayout.LayoutParams bl = (FrameLayout.LayoutParams) backBtn.getLayoutParams();
+            bl.topMargin = topInset + (M3.dp(56) - M3.dp(48)) / 2;
+            backBtn.setLayoutParams(bl);
+        }
+        if (header != null) collapse(lastY);
     }
 
     private FrameLayout buildHeader() {
@@ -99,7 +257,7 @@ public class SettingsActivity extends Activity {
         back.setScaleType(ImageView.ScaleType.CENTER);
         back.setImageDrawable(VecIcon.of(this, R.drawable.ic_back, M3.onSurface, M3.dp(24)));
         // Ripple lingkaran kecil di sekitar ikon, tidak melebar ke seluruh bar.
-        RippleDrawable br = new RippleDrawable(ColorStateList.valueOf(C_RIPPLE), null, null);
+        RippleDrawable br = new RippleDrawable(ColorStateList.valueOf(M3.rippleColor()), null, null);
         br.setRadius(M3.dp(20));
         back.setBackground(br);
         back.setClickable(true);
@@ -108,6 +266,7 @@ public class SettingsActivity extends Activity {
         bl.topMargin = (collapsedH - M3.dp(48)) / 2;
         bl.leftMargin = M3.dp(4);
         h.addView(back, bl);
+        backBtn = back;
 
         // Satu judul saja: posisinya dihitung di collapse() dari bawah header (terbuka)
         // ke sejajar tombol kembali (tertutup).
@@ -143,7 +302,7 @@ public class SettingsActivity extends Activity {
         }
         float s = 1f + (END_SCALE - 1f) * p;
         float topExpanded = expandedH - M3.dp(16) - th;           // menempel di bawah header
-        float topCollapsed = (collapsedH - th * END_SCALE) / 2f;  // sejajar tombol kembali
+        float topCollapsed = topInset + (M3.dp(56) - th * END_SCALE) / 2f;  // sejajar tombol kembali
 
         title.setPivotX(0f);
         title.setPivotY(0f);
@@ -182,7 +341,7 @@ public class SettingsActivity extends Activity {
                         ViewGroup.LayoutParams.MATCH_PARENT, M3.dp(1));
                 dl.leftMargin = M3.dp(60);
                 View divider = new View(this);
-                divider.setBackgroundColor(C_DIVIDER);
+                divider.setBackgroundColor(M3.alpha(M3.onSurface, 0.13f));
                 card.addView(divider, dl);
             }
         }
@@ -216,7 +375,7 @@ public class SettingsActivity extends Activity {
             row.addView(texts, tl);
             row.addView(sw, new LinearLayout.LayoutParams(-2, -2));
 
-            sw.setChecked(Prefs.sourceOn(s.id));
+            sw.setCheckedImmediate(Prefs.sourceOn(s.id));
             sub.setText(sw.isChecked() ? "Aktif" : "Nonaktif");
             row.setOnClickListener(v -> {
                 boolean on = !sw.isChecked();
@@ -229,13 +388,164 @@ public class SettingsActivity extends Activity {
         return card(rows);
     }
 
+    // ------------------------------------------------------------ tampilan
+
+    private interface Toggle { void onToggle(boolean on); }
+
+    /**
+     * Kartu Tampilan: tema, dynamic color, dan warna aksen. Warna aksen hanya muncul
+     * saat dynamic color mati (di bawah dynamic color).
+     */
+    private LinearLayout displayCard() {
+        final boolean dynamicOk = Build.VERSION.SDK_INT >= 31;
+        final boolean dynamicOn = dynamicOk && Prefs.dynamicColor();
+
+        final LinearLayout accentBox = new LinearLayout(this);
+        accentBox.setOrientation(LinearLayout.VERTICAL);
+        accentBox.addView(divider(), dividerParams());
+        accentBox.addView(accentRow(), new LinearLayout.LayoutParams(-1, -2));
+        accentBox.setVisibility(dynamicOn ? View.GONE : View.VISIBLE);
+
+        LinearLayout themeRow = switchRow("Tema aplikasi", "Gelap", "Terang",
+                Prefs.darkTheme(), true, null, on -> {
+                    Prefs.setDarkTheme(on);
+                    applyTheme();
+                });
+        LinearLayout dynRow = switchRow("Dynamic color", "Warna dari wallpaper", "Warna dari App color",
+                dynamicOn, dynamicOk, "Butuh Android 12 atau lebih baru", on -> {
+                    Prefs.setDynamicColor(on);
+                    accentBox.setVisibility(on ? View.GONE : View.VISIBLE);
+                    applyTheme();
+                });
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackground(M3.shape(M3.surfaceContainerHigh, 20));
+        card.setClipToOutline(true);
+        card.addView(themeRow, new LinearLayout.LayoutParams(-1, -2));
+        card.addView(divider(), dividerParams());
+        card.addView(dynRow, new LinearLayout.LayoutParams(-1, -2));
+        card.addView(accentBox, new LinearLayout.LayoutParams(-1, -2));
+        return card;
+    }
+
+    /** Baris dengan saklar. Saklar hanya tampilan; ketukan pada baris yang menanganinya. */
+    private LinearLayout switchRow(String label, final String onText, final String offText, boolean on,
+                                   boolean enabled, String disabledText, final Toggle toggle) {
+        final LinearLayout row = baseRow();
+        final TextView sub = M3.text(this, "", 13, M3.onSurfaceVariant, false);
+        final MaterialSwitch sw = new MaterialSwitch(this);
+        sw.setEnabled(false);
+        sw.setFocusable(false);
+        sw.setActiveColor(M3.primary);
+        sw.setInactiveColor(Color.TRANSPARENT);
+        sw.setStrokeActiveColor(M3.primary);
+        sw.setStrokeInactiveColor(M3.outline);
+        sw.setThumbActiveColor(M3.onPrimary);
+        sw.setThumbInactiveColor(M3.outline);
+        sw.setCheckedImmediate(on);
+        sub.setText(!enabled ? disabledText : (on ? onText : offText));
+
+        LinearLayout texts = new LinearLayout(this);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        texts.addView(M3.text(this, label, 16, M3.onSurface, false));
+        texts.addView(sub);
+        row.addView(texts, new LinearLayout.LayoutParams(0, -2, 1f));
+        row.addView(sw, new LinearLayout.LayoutParams(-2, -2));
+
+        if (enabled) {
+            row.setOnClickListener(v -> {
+                boolean next = !sw.isChecked();
+                sw.setChecked(next);
+                sub.setText(next ? onText : offText);
+                toggle.onToggle(next);
+            });
+        } else {
+            row.setClickable(false);
+            row.setBackground(null);
+            row.setAlpha(0.38f);   // tampilan nonaktif M3
+        }
+        return row;
+    }
+
+    /** Baris "App color": ketuk untuk membuka pemilih warna di bottom sheet. */
+    private LinearLayout accentRow() {
+        final LinearLayout row = baseRow();
+        final int saved = Prefs.appColor();
+        final int current = saved != 0 ? saved : DEFAULT_ACCENT;
+
+        final TextView sub = M3.text(this, saved == 0 ? "Palet bawaan Pinpic" : hex(saved),
+                13, M3.onSurfaceVariant, false);
+        LinearLayout texts = new LinearLayout(this);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        texts.addView(M3.text(this, "App color", 16, M3.onSurface, false));
+        texts.addView(sub);
+        row.addView(texts, new LinearLayout.LayoutParams(0, -2, 1f));
+
+        GradientDrawable dot = new GradientDrawable();
+        dot.setShape(GradientDrawable.OVAL);
+        dot.setColor(current);
+        View dotView = new View(this);
+        dotView.setBackground(dot);
+        row.addView(dotView, new LinearLayout.LayoutParams(M3.dp(28), M3.dp(28)));
+
+        row.setOnClickListener(v -> ColorPicker.show(this, current, color -> {
+            Prefs.setAppColor(color);
+            applyTheme();
+        }));
+        return row;
+    }
+
+    /**
+     * Tema atau warna berubah. Beri waktu sebentar supaya saklar yang diketuk selesai bergeser,
+     * lalu isi layar dibangun ulang di tempat dengan palet baru (tanpa recreate). Layar utama
+     * menyesuaikan diri saat kita kembali.
+     */
+    private void applyTheme() {
+        // Preferensi langsung disimpan. Ketukan pertama langsung diproses (frame berikutnya); ketukan
+        // beruntun dibatasi tiap THEME_STEP_MS, jadi tema tetap berubah sambil di-spam tanpa menunggu berhenti.
+        rootFrame.removeCallbacks(rebuildRunnable);
+        long wait = Math.max(0, lastThemeAt + THEME_STEP_MS - SystemClock.uptimeMillis());
+        rootFrame.postDelayed(rebuildRunnable, wait);
+    }
+
+    private final Runnable rebuildRunnable = () -> rebuildTheme();
+
+    private void rebuildTheme() {
+        if (isFinishing() || isDestroyed()) return;
+        lastThemeAt = SystemClock.uptimeMillis();
+        final int y = lastY;
+        // Akhiri semua ripple dulu: snapshot digambar lewat Canvas biasa (tanpa clipToOutline),
+        // jadi ripple yang masih jalan akan terekam sebagai kotak persegi lalu ikut memudar.
+        endRipples(rootFrame);
+        final Bitmap snap = snapshotOf(rootFrame);
+        M3.init(this);   // palet dihitung ulang dari Prefs terbaru
+        buildScreen(y, snap);
+    }
+
+    private View divider() {
+        View v = new View(this);
+        v.setBackgroundColor(M3.alpha(M3.onSurface, 0.13f));
+        return v;
+    }
+
+    private LinearLayout.LayoutParams dividerParams() {
+        LinearLayout.LayoutParams dl = new LinearLayout.LayoutParams(-1, M3.dp(1));
+        dl.leftMargin = M3.dp(60);
+        return dl;
+    }
+
+    private static String hex(int argb) {
+        return String.format("#%06X", 0xFFFFFF & argb);
+    }
+
     private LinearLayout baseRow() {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(M3.dp(16), M3.dp(14), M3.dp(16), M3.dp(14));
         // Mask (bukan null) membatasi ripple di dalam baris; tanpa mask ripple melebar ke baris lain.
-        row.setBackground(new RippleDrawable(ColorStateList.valueOf(C_RIPPLE), null, new ColorDrawable(Color.WHITE)));
+        row.setBackground(new RippleDrawable(ColorStateList.valueOf(M3.rippleColor()), null, new ColorDrawable(Color.WHITE)));
         row.setClickable(true);
         return row;
     }

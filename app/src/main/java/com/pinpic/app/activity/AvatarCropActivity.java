@@ -36,6 +36,7 @@ public final class AvatarCropActivity extends Activity {
         M3.init(this);
         getWindow().setStatusBarColor(M3.background);
         getWindow().setNavigationBarColor(M3.background);
+        M3.styleBars(getWindow());
 
         final Uri uri = getIntent().getData();
         if (uri == null) {

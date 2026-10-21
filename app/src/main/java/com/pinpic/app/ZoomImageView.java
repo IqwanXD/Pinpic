@@ -17,9 +17,9 @@ import android.view.ViewParent;
 import android.widget.ImageView;
 
 /**
- * Reconstructed source for ru.inoui.ZoomImageView, based on the supplied
- * classes.jar bytecode. Uses framework Android APIs only (no AndroidX/AppCompat).
- * Java 8 lambdas are used for animator update callbacks.
+ * Port dari ru.inoui.ZoomImageView (classes.jar). Logika dicocokkan dengan bytecode asli:
+ * pembatasan geser (getRestrictedX/YDistance), urutan event sentuh (onTouchEvent), dan animasi reset.
+ * Hanya memakai API framework Android (tanpa AndroidX/AppCompat).
  */
 public class ZoomImageView extends ImageView
         implements ScaleGestureDetector.OnScaleGestureListener {
@@ -249,22 +249,15 @@ public class ZoomImageView extends ImageView
             if (bounds.left > 0.0f
                     || bounds.left + distance <= 0.0f
                     || scaleDetector.isInProgress()) {
-                float result = distance;
-                if (bounds.right >= getWidth()) {
-                    result = distance;
-                    if (bounds.right + distance < getWidth()) {
-                        if (scaleDetector.isInProgress()) {
-                            result = distance;
-                        } else {
-                            result = getWidth() - bounds.right;
-                        }
-                    }
-                    return result;
-                }
-                if (scaleDetector.isInProgress()) {
+                // Asli (bytecode): sisi kanan masih di dalam layar, gerakan diteruskan apa adanya.
+                if (bounds.right < getWidth()) {
                     return distance;
                 }
-                return -bounds.left;
+                float result = distance;
+                if (bounds.right + distance < getWidth()) {
+                    result = scaleDetector.isInProgress() ? distance : getWidth() - bounds.right;
+                }
+                return result;
             }
             return -bounds.left;
         }
@@ -289,22 +282,15 @@ public class ZoomImageView extends ImageView
             if (bounds.top > 0.0f
                     || bounds.top + distance <= 0.0f
                     || scaleDetector.isInProgress()) {
-                float result = distance;
-                if (bounds.bottom >= getHeight()) {
-                    result = distance;
-                    if (bounds.bottom + distance < getHeight()) {
-                        if (scaleDetector.isInProgress()) {
-                            result = distance;
-                        } else {
-                            result = getHeight() - bounds.bottom;
-                        }
-                    }
-                    return result;
-                }
-                if (scaleDetector.isInProgress()) {
+                // Asli (bytecode): sisi bawah masih di dalam layar, gerakan diteruskan apa adanya.
+                if (bounds.bottom < getHeight()) {
                     return distance;
                 }
-                return -bounds.top;
+                float result = distance;
+                if (bounds.bottom + distance < getHeight()) {
+                    result = scaleDetector.isInProgress() ? distance : getHeight() - bounds.bottom;
+                }
+                return result;
             }
             return -bounds.top;
         }
@@ -515,24 +501,14 @@ public class ZoomImageView extends ImageView
         }
 
         if (!singleTapDetected) {
-            if (event.getActionMasked() == MotionEvent.ACTION_DOWN
-                    || currentPointerCount != previousPointerCount) {
+            // Urutan sama dengan bytecode asli: (1) DOWN/ganti jumlah jari -> catat titik awal,
+            // atau (2) MOVE -> geser dan zoom. Setelah itu, untuk SEMUA event: reset saat UP/CANCEL,
+            // minta parent melepas sentuhan, dan catat jumlah jari. Dulu bagian ini hanya di cabang (1),
+            // sehingga gambar tidak pernah kembali ke batas saat jari diangkat.
+            final int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN || currentPointerCount != previousPointerCount) {
                 last.set(scaleDetector.getFocusX(), scaleDetector.getFocusY());
-
-                if (event.getActionMasked() == MotionEvent.ACTION_UP
-                        || event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
-                    scaleBy = 1.0f;
-                    resetImage();
-                }
-
-                ViewParent parent = getParent();
-                if (parent != null) {
-                    parent.requestDisallowInterceptTouchEvent(disallowParentTouch(event));
-                }
-                previousPointerCount = currentPointerCount;
-            }
-
-            if (event.getActionMasked() == MotionEvent.ACTION_MOVE) {
+            } else if (action == MotionEvent.ACTION_MOVE) {
                 float focusX = scaleDetector.getFocusX();
                 float focusY = scaleDetector.getFocusY();
                 if (allowTranslate(event)) {
@@ -548,6 +524,17 @@ public class ZoomImageView extends ImageView
                 setImageMatrix(matrix);
                 last.set(focusX, focusY);
             }
+
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                scaleBy = 1.0f;
+                resetImage();
+            }
+
+            ViewParent parent = getParent();
+            if (parent != null) {
+                parent.requestDisallowInterceptTouchEvent(disallowParentTouch(event));
+            }
+            previousPointerCount = currentPointerCount;
         }
         return true;
     }

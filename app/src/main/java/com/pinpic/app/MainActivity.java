@@ -1,5 +1,7 @@
 package com.pinpic.app;
 
+import android.os.Environment;
+import com.pinpic.app.activity.FeedView;
 import android.Manifest;
 import android.app.Activity;
 import android.content.Context;
@@ -7,6 +9,7 @@ import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Insets;
 import android.graphics.drawable.ColorDrawable;
@@ -22,6 +25,7 @@ import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
+import android.view.animation.DecelerateInterpolator;
 import android.view.animation.OvershootInterpolator;
 import android.view.animation.PathInterpolator;
 import android.view.inputmethod.InputMethodManager;
@@ -70,6 +74,8 @@ public class MainActivity extends Activity {
     private NavBar nav;
     private BottomSheet sheet;
     private Pin pendingPin;
+    /** Baru saja menerima jawaban dialog izin; pengecekan izin saat onResume berikutnya dilewati. */
+    private boolean permissionAnswered;
 
     private HomeScreen home;
     private SearchScreen searchScreen;
@@ -92,10 +98,18 @@ public class MainActivity extends Activity {
     };
 
     // ------------------------------------------------------------ lifecycle
+    /** Tema yang dipakai saat layar ini dibangun. Berbeda dari M3.paletteKey = tema diubah di Pengaturan. */
+    private String shownPalette = "";
+    /** Feed beranda lama yang dibawa ke layar baru saat tema berubah (agar item tidak dimuat ulang). */
+    private FeedView keepFeed;
+    /** Layar Cari lama yang teks dan hasilnya dibawa ke layar baru saat tema berubah. */
+    private SearchScreen keepSearch;
+
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
         Prefs.init(this);
         M3.init(this);
+        shownPalette = M3.paletteKey;
         try { HttpResponseCache.install(new File(getCacheDir(), "http"), 60L << 20); } catch (Exception ignored) { }
         buildUi();
         setupEdgeToEdge();
@@ -103,10 +117,75 @@ public class MainActivity extends Activity {
         screens[current].onShown();
     }
 
+    @Override protected void onActivityResult(int req, int res, Intent data) {
+        super.onActivityResult(req, res, data);
+        if (profile != null) profile.onActivityResult(req, res, data);
+    }
+
     @Override protected void onResume() {
         super.onResume();
+        // Tema atau warna diubah di Pengaturan: bangun ulang layar ini dengan palet baru.
+        if (!M3.paletteKey.equals(shownPalette)) rebuildTheme();
+        // Kembali dari Pengaturan Android atau dialog izin: lanjutkan unduhan yang tadi tertunda.
+        if (pendingPin != null && canSave()) {
+            Pin p = pendingPin;
+            pendingPin = null;
+            download(p);
+        }
         // Kembali dari pengaturan/pratinjau: pastikan galeri Saya sesuai isi folder terbaru.
         if (profile != null && current == NavBar.ME) profile.refresh();
+        askStorageIfNeeded();
+    }
+
+    /**
+     * Tema/warna berubah di Pengaturan: bangun ulang UI di tempat (tanpa recreate activity),
+     * pertahankan tab yang sedang dibuka, lalu pudarkan snapshot tampilan lama di atasnya.
+     * Dibanding recreate() tidak ada kedipan layar kosong, dan tab aktif tidak kembali ke Beranda.
+     */
+    private void rebuildTheme() {
+        Bitmap snap = null;
+        if (drawerLayout != null && drawerLayout.getWidth() > 0 && drawerLayout.getHeight() > 0) {
+            try {
+                snap = Bitmap.createBitmap(drawerLayout.getWidth(), drawerLayout.getHeight(), Bitmap.Config.ARGB_8888);
+                drawerLayout.draw(new Canvas(snap));
+            } catch (OutOfMemoryError e) {
+                snap = null;
+            }
+        }
+
+        keepFeed = home != null ? home.feed() : null;
+        keepSearch = searchScreen;
+        if (searchScreen != null) searchScreen.onHidden();   // hentikan rotasi hint lama
+        // Lepas UI lama: layar yang sedang tampil dihentikan, pratinjau dihancurkan.
+        if (screens != null) screens[current].onHidden();
+        for (DetailPage p : detailStack) p.view.destroy();
+        detailStack.clear();
+        sheet = null;
+        snack = null;
+        chromeHidden = false;
+
+        M3.init(this);
+        shownPalette = M3.paletteKey;
+        buildUi();
+        nav.select(current);
+        setupEdgeToEdge();
+        drawerLayout.requestApplyInsets();
+        screens[current].onShown();
+
+        if (snap != null) {
+            final Bitmap bmp = snap;
+            final ImageView cover = new ImageView(this);
+            cover.setImageBitmap(bmp);
+            cover.setScaleType(ImageView.ScaleType.FIT_XY);
+            root.addView(cover, new FrameLayout.LayoutParams(-1, -1));
+            cover.animate().alpha(0f).setDuration(220)
+                    .setInterpolator(new DecelerateInterpolator(1.5f))
+                    .withEndAction(() -> {
+                        root.removeView(cover);
+                        cover.setImageDrawable(null);
+                        bmp.recycle();
+                    }).start();
+        }
     }
 
     @Override public void onBackPressed() {
@@ -135,15 +214,13 @@ public class MainActivity extends Activity {
         }
         if (Build.VERSION.SDK_INT >= 30) {
             w.setDecorFitsSystemWindows(false);
-            WindowInsetsController c = w.getDecorView().getWindowInsetsController();
-            if (c != null) c.setSystemBarsAppearance(0,
-                    WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
-                            | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS);
         } else {
             w.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                     | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
                     | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
         }
+        // Ikon bar status dan navigasi: terang di tema gelap, gelap di tema terang.
+        M3.styleBars(w);
     }
 
     @SuppressWarnings("deprecation")
@@ -165,8 +242,10 @@ public class MainActivity extends Activity {
         buildDrawer();
 
         // Tiga layar hidup berdampingan di satu FrameLayout; hanya satu yang terlihat.
-        home = new HomeScreen(this, host, () -> drawerLayout.toggle());
-        searchScreen = new SearchScreen(this, host);
+        home = new HomeScreen(this, host, () -> drawerLayout.toggle(), keepFeed);
+        keepFeed = null;
+        searchScreen = new SearchScreen(this, host, keepSearch);
+        keepSearch = null;
         profile = new ProfileScreen(this, host);
         screens = new Screen[]{home, searchScreen, profile};
 
@@ -210,7 +289,7 @@ public class MainActivity extends Activity {
                 startActivity(new Intent(MainActivity.this, SettingsActivity.class))));
 
         View div = new View(this);
-        div.setBackgroundColor(0x33FFFFFF);
+        div.setBackgroundColor(M3.alpha(M3.onSurface, 0.2f));
         drawer.addView(div, lp(-1, M3.dp(1), 0, M3.dp(16), 0, M3.dp(16)));
 
         TextView related = M3.text(this, "Tautan terkait", 14, M3.onSurfaceVariant, true);
@@ -303,7 +382,7 @@ public class MainActivity extends Activity {
         wrap.setOrientation(LinearLayout.VERTICAL);
         wrap.addView(row);
         View line = new View(this);
-        line.setBackgroundColor(0x22FFFFFF);
+        line.setBackgroundColor(M3.alpha(M3.onSurface, 0.13f));
         wrap.addView(line, new LinearLayout.LayoutParams(-1, 1));
         return wrap;
     }
@@ -526,7 +605,9 @@ public class MainActivity extends Activity {
             float ty = hide ? M3.dp(120) : 0f;
             nav.animate().alpha(a).translationY(ty).setDuration(220).start();
         }
-        home.setShadeVisible(sheetOpen && detailStack.isEmpty() && current == NavBar.HOME);
+        boolean shade = sheetOpen && detailStack.isEmpty();
+        home.setShadeVisible(shade && current == NavBar.HOME);
+        searchScreen.setShadeVisible(shade && current == NavBar.SEARCH);
     }
 
     private void showOptions(final Pin pin, int tileWidth) {
@@ -592,43 +673,84 @@ public class MainActivity extends Activity {
     }
 
     // ------------------------------------------------------------ download & izin
+    /**
+     * Sudah boleh menyimpan dan menghapus gambar di Pictures/Pinpic. Dicek setiap kali, jadi
+     * setelah diberi izin tidak pernah ditanya lagi. Android 11+ memakai MANAGE_EXTERNAL_STORAGE,
+     * Android 10 ke bawah memakai izin baca dan tulis biasa.
+     */
     private boolean storageReady() {
-        if (Build.VERSION.SDK_INT >= 29) return Prefs.storageOk();
-        return checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
+        if (Build.VERSION.SDK_INT >= 30) return Environment.isExternalStorageManager();
+        return checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+                && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    /** Sudah bisa menyimpan: lewat folder pilihan (SAF) atau izin penyimpanan umum. */
+    private boolean canSave() {
+        // Folder pilihan (SAF) tidak butuh izin penyimpanan umum.
+        return Prefs.downloadTree() != null || storageReady();
+    }
+
+    /**
+     * Izin penyimpanan belum diberikan: tampilkan permintaan. Dipanggil setiap aplikasi kembali tampil
+     * (termasuk saat pertama dibuka). Begitu izin sudah ada, sheet ini tidak pernah muncul lagi, baik
+     * saat unduh maupun saat onResume.
+     */
+    private void askStorageIfNeeded() {
+        if (permissionAnswered) { permissionAnswered = false; return; }
+        if (canSave()) return;
+        if (sheet != null && sheet.isOpen()) return;
+        showStorageSheet(null);
     }
 
     private void download(final Pin pin) {
-        // Folder pilihan (SAF) tidak butuh izin penyimpanan umum.
-        if (Prefs.downloadTree() == null && !storageReady()) { showStorageSheet(pin); return; }
+        if (!canSave()) { showStorageSheet(pin); return; }
         snack("Mengunduh…");
         Downloader.save(this, (ok, msg) -> snack(msg), pin.full, pin.thumb);
     }
 
+    /**
+     * Sheet permintaan izin penyimpanan. pin != null: unduhan yang tertunda dilanjutkan setelah izin
+     * diberikan. pin == null: hanya meminta izin (saat dibuka atau kembali ke aplikasi).
+     */
     private void showStorageSheet(final Pin pin) {
-        String body = Build.VERSION.SDK_INT >= 29
-                ? "Pinpic menyimpan gambar ke folder Pictures/Pinpic. Di Android 10+ Pinpic tidak butuh akses ke seluruh file Anda."
-                : "Pinpic memerlukan izin penyimpanan untuk menyimpan gambar ke folder Pictures/Pinpic di perangkat Anda.";
-        confirmSheet("Izinkan akses penyimpanan", body, "Izinkan", () -> {
-            closeSheet();
-            if (Build.VERSION.SDK_INT >= 29) {
-                Prefs.setStorageOk();
-                download(pin);
-            } else {
-                pendingPin = pin;
-                requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_STORAGE);
-            }
-        });
+        final Drawable folder = VecIcon.of(this, R.drawable.ic_folder, M3.onPrimaryContainer, M3.dp(32));
+        if (Build.VERSION.SDK_INT >= 30) {
+            confirmSheet(folder,
+                    "Izinkan akses semua file",
+                    "Pinpic perlu akses ke semua file untuk menyimpan dan menghapus gambar di folder Pictures/Pinpic. Di layar berikutnya, aktifkan \"Izinkan akses ke semua file\" untuk Pinpic.",
+                    "Buka pengaturan", () -> {
+                        closeSheet();
+                        if (pin != null) pendingPin = pin;   // unduhan dilanjutkan otomatis saat kembali ke Pinpic
+                        startActivity(new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                Uri.parse("package:" + getPackageName())));
+                    });
+            return;
+        }
+        confirmSheet(folder,
+                "Izinkan akses penyimpanan",
+                "Pinpic memerlukan izin penyimpanan untuk menyimpan dan menghapus gambar di folder Pictures/Pinpic di perangkat Anda.",
+                "Izinkan", () -> {
+                    closeSheet();
+                    if (pin != null) pendingPin = pin;
+                    requestPermissions(new String[]{Manifest.permission.READ_EXTERNAL_STORAGE,
+                            Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_STORAGE);
+                });
     }
 
     @Override
     public void onRequestPermissionsResult(int rc, String[] perms, int[] res) {
         super.onRequestPermissionsResult(rc, perms, res);
         if (rc != REQ_STORAGE) return;
-        if (res.length > 0 && res[0] == PackageManager.PERMISSION_GRANTED) {
-            if (pendingPin != null) download(pendingPin);
+        permissionAnswered = true;
+        boolean all = res.length > 0;
+        for (int r : res) if (r != PackageManager.PERMISSION_GRANTED) all = false;
+        Pin p = pendingPin;
+        pendingPin = null;
+        if (all) {
+            if (p != null) download(p);
         } else if (!shouldShowRequestPermissionRationale(Manifest.permission.WRITE_EXTERNAL_STORAGE)) {
             confirmSheet("Izin penyimpanan ditolak",
-                    "Aktifkan izin Penyimpanan untuk Pinpic di Pengaturan agar bisa mengunduh gambar.",
+                    "Aktifkan izin Penyimpanan untuk Pinpic di Pengaturan agar bisa mengunduh dan menghapus gambar.",
                     "Buka Pengaturan", () -> {
                         closeSheet();
                         startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,

@@ -25,7 +25,6 @@ import java.util.concurrent.Future;
 public final class DetailView extends FrameLayout {
 
     private static final int CARD_RADIUS_DP = 24;
-    private static final int MAX_QUERY_CHARS = 80;
 
     private final FeedView feed;
     private final LinearLayout header;
@@ -99,12 +98,12 @@ public final class DetailView extends FrameLayout {
         al.setMargins(M3.dp(16), M3.dp(16), M3.dp(16), M3.dp(20));
         header.addView(actions, al);
 
-        // Grid serupa: pakai judul pin, kalau tidak ada pakai kata kunci asalnya.
-        String q = title.length() > MAX_QUERY_CHARS ? title.substring(0, MAX_QUERY_CHARS) : title;
+        // Di bawah pratinjau: gambar acak seperti Beranda (bukan turunan dari gambar yang dibuka),
+        // jadi setiap pembukaan menampilkan urutan yang berbeda.
         feed = new FeedView(act, host, true);
         feed.setHeader(header);
         addView(feed, new FrameLayout.LayoutParams(-1, -1));
-        feed.search(q);
+        feed.search("");
 
         job = ImageLoader.load(pin.full, pin.thumb, screenW, Bitmap.Config.ARGB_8888, bmp -> {
             if (bmp == null) return;

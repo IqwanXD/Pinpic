@@ -22,6 +22,11 @@ public final class HomeScreen implements Screen {
     private final View shade;
 
     public HomeScreen(Activity act, ScreenHost host, final Runnable onMenu) {
+        this(act, host, onMenu, null);
+    }
+
+    /** prev: feed beranda sebelumnya (saat tema berubah), agar item tidak dimuat ulang. */
+    public HomeScreen(Activity act, ScreenHost host, final Runnable onMenu, FeedView prev) {
         root = new FrameLayout(act);
 
         LinearLayout col = new LinearLayout(act);
@@ -50,17 +55,19 @@ public final class HomeScreen implements Screen {
         header.addView(titleRow, new LinearLayout.LayoutParams(-2, -2));
         col.addView(header, new LinearLayout.LayoutParams(-1, -2));
 
-        feed = new FeedView(act, host);
+        feed = new FeedView(act, host, false, prev);
         col.addView(feed, new LinearLayout.LayoutParams(-1, 0, 1f));
         root.addView(col, new FrameLayout.LayoutParams(-1, -1));
 
         shade = new View(act);
         shade.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{0xB3000000, 0x00000000}));
+                new int[]{M3.dark ? 0xB3000000 : 0x26000000, 0x00000000}));
         shade.setAlpha(0f);
         root.addView(shade, new FrameLayout.LayoutParams(-1, M3.dp(28), Gravity.TOP));
         header.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> shade.setTranslationY(b));
     }
+
+    public FeedView feed() { return feed; }
 
     /** Bayangan atas tampil hanya saat diminta (MainActivity: sheet terbuka dan tidak ada pratinjau). */
     public void setShadeVisible(boolean on) {

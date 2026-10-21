@@ -49,6 +49,33 @@ public final class Prefs {
         return n;
     }
 
+    /** Tema gelap (default, sesuai tampilan sebelumnya). false = terang. */
+    public static boolean darkTheme() {
+        return sp == null || sp.getBoolean("theme_dark", true);
+    }
+
+    public static void setDarkTheme(boolean on) {
+        if (sp != null) sp.edit().putBoolean("theme_dark", on).apply();
+    }
+
+    /** Warna dari wallpaper (Material You, Android 12+). Default aktif. */
+    public static boolean dynamicColor() {
+        return sp == null || sp.getBoolean("dynamic_color", true);
+    }
+
+    public static void setDynamicColor(boolean on) {
+        if (sp != null) sp.edit().putBoolean("dynamic_color", on).apply();
+    }
+
+    /** Warna aksen pilihan sendiri (ARGB). 0 = palet bawaan Pinpic. */
+    public static int appColor() {
+        return sp == null ? 0 : sp.getInt("app_color", 0);
+    }
+
+    public static void setAppColor(int argb) {
+        if (sp != null) sp.edit().putInt("app_color", argb).apply();
+    }
+
     public static boolean storageOk() {
         return sp != null && sp.getBoolean("storage_ok", false);
     }

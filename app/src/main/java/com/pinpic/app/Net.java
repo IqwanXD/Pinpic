@@ -32,8 +32,8 @@ final class Net {
     static HttpURLConnection open(String url, String ua, String referer, String cookie, String[] extra) throws IOException {
         for (int i = 0; i < 6; i++) {
             HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
-            c.setConnectTimeout(10000);
-            c.setReadTimeout(20000);
+            c.setConnectTimeout(6000);
+            c.setReadTimeout(10000);
             c.setInstanceFollowRedirects(false);
             c.setRequestProperty("User-Agent", ua);
             c.setRequestProperty("Accept-Language", "en-US,en;q=0.9,id;q=0.8");

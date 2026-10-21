@@ -1,5 +1,6 @@
 package com.pinpic.app.activity;
 
+import java.util.ArrayList;
 import android.app.Activity;
 import android.graphics.Bitmap;
 import android.view.Gravity;
@@ -18,15 +19,22 @@ import java.util.List;
 
 /**
  * Grid hasil gambar dengan muat halaman berikutnya.
- * - Mode biasa (Beranda/Cari): tarik ke bawah dari atas adalah satu-satunya cara refresh.
+ * - Beranda (query kosong): gambar acak yang tidak pernah habis. Halaman kosong dicoba lagi.
+ * - Cari dengan kata kunci: berhenti setelah dua halaman kosong berturut-turut.
  * - Mode detail: tanpa swipe refresh; grid bisa diberi header (pratinjau) yang ikut ter-scroll.
  * Indikator memuat di bawah berada di luar SwipeRefresh, sehingga tidak bisa ditarik.
  */
 public final class FeedView extends FrameLayout {
 
+    /** Halaman kosong beruntun di beranda sebelum berhenti sementara dan menampilkan pesan. */
+    private static final int FEED_RETRIES = 6;
+    private static final long RETRY_DELAY_MS = 400;
+
     private final ScreenHost host;
     private final boolean detail;
-    private final Scraper scraper = new Scraper();
+    private Scraper scraper = new Scraper();
+    /** Pin yang sudah tampil; dipakai agar tidak dimuat ulang saat tema berubah. */
+    private final List<Pin> shown = new ArrayList<>();
     private final MasonryGridView grid;
     private final SimpleSwipeRefreshLayout swipe; // null pada mode detail
     private final FrameLayout loader;
@@ -40,6 +48,11 @@ public final class FeedView extends FrameLayout {
     }
 
     public FeedView(Activity act, final ScreenHost host, boolean detail) {
+        this(act, host, detail, null);
+    }
+
+    /** prev != null: lanjutkan dari layar lama (item, scraper, scroll) tanpa memuat ulang. */
+    public FeedView(Activity act, final ScreenHost host, boolean detail, FeedView prev) {
         super(act);
         this.host = host;
         this.detail = detail;
@@ -81,6 +94,35 @@ public final class FeedView extends FrameLayout {
         loader.addView(indicator, new FrameLayout.LayoutParams(M3.dp(28), M3.dp(28), Gravity.CENTER));
         addView(loader, new FrameLayout.LayoutParams(M3.dp(48), M3.dp(48),
                 Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL));
+
+        if (prev != null && !detail) {
+            scraper = prev.scraper;          // gambar yang sudah pernah tampil tetap diingat
+            query = prev.query;
+            page = prev.page;
+            searchGen = prev.searchGen;
+            empties = prev.empties;
+            exhausted = prev.exhausted;
+            any = prev.any;
+            started = prev.started;
+            loading = false;                 // permintaan yang sedang jalan di layar lama tidak sampai ke sini
+            final List<Pin> keep = new ArrayList<>(prev.shown);
+            final int y = prev.scrollY();
+            shown.addAll(keep);
+            grid.post(() -> {
+                for (Pin pin : keep) grid.addPin(pin);
+                // Belum ada gambar dan masih memuat (mis. tema diganti saat loading): tampilkan lagi kotak shimmer.
+                if (keep.isEmpty() && started && !exhausted) {
+                    grid.showPlaceholders();
+                    loadMore();
+                }
+                grid.post(() -> grid.scrollTo(0, y));
+            });
+        }
+    }
+
+    /** Posisi scroll grid, dipakai saat layar dibangun ulang. */
+    public int scrollY() {
+        return grid.getScrollY();
     }
 
     /** Muat halaman pertama sekali, saat layar pertama kali tampil. */
@@ -91,7 +133,7 @@ public final class FeedView extends FrameLayout {
         loadMore();
     }
 
-    /** Ganti kata kunci dan muat hasil dari awal. */
+    /** Ganti kata kunci dan muat hasil dari awal. Kosong = gambar acak beranda. */
     public void search(String q) {
         doSearch(q);
     }
@@ -129,6 +171,7 @@ public final class FeedView extends FrameLayout {
         loading = false;
         scraper.reset();
         grid.clear();
+        shown.clear();
         if (!refreshing) grid.showPlaceholders();
         loadMore();
     }
@@ -153,7 +196,22 @@ public final class FeedView extends FrameLayout {
         }
         loading = false;
         if (r.isEmpty()) {
-            if (++empties >= 2) {
+            empties++;
+            if (query.isEmpty()) {
+                // Beranda tidak pernah dianggap habis: coba lagi dengan topik dan halaman acak lain.
+                if (empties < FEED_RETRIES) {
+                    retryLater(g);
+                    return;
+                }
+                empties = 0;
+                setLoader(false);
+                if (!any) grid.hidePlaceholders();
+                host.onMessage(Prefs.sourcesOn() == 0
+                        ? "Semua sumber dimatikan. Aktifkan di Pengaturan."
+                        : "Belum ada gambar baru. Gulir ke bawah untuk mencoba lagi.");
+                return;
+            }
+            if (empties >= 2) {
                 exhausted = true;
                 setLoader(false);
                 if (!any) {
@@ -170,9 +228,17 @@ public final class FeedView extends FrameLayout {
         empties = 0;
         any = true;
         setLoader(false);
-        grid.hidePlaceholders();
+        // Kotak shimmer dibiarkan sampai gambar pertama benar-benar tampil (lihat MasonryGridView.addTile).
+        shown.addAll(r);
         for (Pin pin : r) grid.addPin(pin);
         grid.post(() -> grid.checkEnd());
+    }
+
+    /** Halaman beranda kosong: tunggu sebentar, lalu muat lagi. */
+    private void retryLater(final int g) {
+        postDelayed(() -> {
+            if (g == searchGen) loadMore();
+        }, RETRY_DELAY_MS);
     }
 
     /** Tampilkan / sembunyikan loader bawah dengan animasi scale. */

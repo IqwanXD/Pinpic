@@ -100,6 +100,7 @@ public final class MasonryGridView extends ScrollView {
             if (g != gen) return;
             pending--;
             if (bmp != null) addTile(pin, bmp.getHeight() / (float) bmp.getWidth());
+            else if (pending == 0 && tiles.isEmpty()) hidePlaceholders();   // semua gagal: jangan kotak kosong selamanya
             post(() -> checkEnd());
         });
     }
@@ -108,7 +109,9 @@ public final class MasonryGridView extends ScrollView {
         Tile t = new Tile(getContext(), pin, Math.max(0.6f, Math.min(2f, ratio)));
         tiles.add(t);
         if (tileW > 0 && cols.length > 0) {
-            place(t);
+            // Kotak kosong bertahan sampai ada gambar yang benar-benar bisa ditaruh di grid.
+            if (wantPlaceholders) hidePlaceholders();   // hidePlaceholders juga menaruh ulang semua tile
+            else place(t);
             refreshVisible();
         }
     }
@@ -132,6 +135,7 @@ public final class MasonryGridView extends ScrollView {
             cols[i] = col;
         }
         for (Tile t : tiles) place(t);
+        if (!tiles.isEmpty()) wantPlaceholders = false;   // sudah ada gambar: tidak perlu kotak kosong
         addPlaceholders();
         refreshVisible();
     }
@@ -180,13 +184,13 @@ public final class MasonryGridView extends ScrollView {
     }
 
     private void addPlaceholders() {
-        if (!wantPlaceholders || cols.length == 0 || tileW == 0) return;
+        if (!wantPlaceholders || cols.length == 0 || tileW == 0 || !tiles.isEmpty()) return;
         for (int i = 0; i < PH_COUNT; i++) {
             int best = 0;
             for (int k = 1; k < heights.length; k++) if (heights[k] < heights[best]) best = k;
             int h = Math.round(tileW * PH_RATIOS[i % PH_RATIOS.length]);
-            View v = new View(getContext());
-            v.setBackground(M3.shape(M3.surfaceContainerHigh, 16));
+            // Kilau shimmer lembut: menandakan sedang memuat, bukan layar kosong.
+            View v = new ShimmerView(getContext(), 22);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(tileW, h);
             lp.setMargins(gap / 2, gap / 2, gap / 2, gap / 2);
             cols[best].addView(v, lp);
@@ -199,7 +203,8 @@ public final class MasonryGridView extends ScrollView {
         if (pending > 0 || listener == null || tileW == 0 || tiles.isEmpty()) return;
         int max = 0;
         for (int h : heights) max = Math.max(max, h);
-        if (getScrollY() + getHeight() >= getPaddingTop() + headerH() + max - getHeight()) listener.onEndReached();
+        // Muat halaman berikutnya saat sisa konten di bawah layar kurang dari dua layar.
+        if (getScrollY() + getHeight() * 3 >= getPaddingTop() + headerH() + max) listener.onEndReached();
     }
 
     @Override protected void onSizeChanged(int w, int h, int ow, int oh) {
@@ -221,13 +226,16 @@ public final class MasonryGridView extends ScrollView {
         int y, h, reqW;
         boolean shown;
         Future<?> job;
+        /** Kilau shimmer selama gambar belum siap; berhenti begitu gambar tampil atau tile disembunyikan. */
+        final ShimmerDrawable shimmer;
 
         Tile(Context c, final Pin p, float r) {
             super(c);
             pin = p;
             ratio = r;
             setScaleType(ScaleType.CENTER_CROP);
-            setBackgroundColor(M3.surfaceContainerHigh);
+            shimmer = new ShimmerDrawable(M3.dp(22));
+            setBackground(shimmer);
             M3.round(this, 22);
             setOnClickListener(v -> {
                 if (listener != null) listener.onClick(p, ImageLoader.cached(p.thumb, reqW));
@@ -255,10 +263,13 @@ public final class MasonryGridView extends ScrollView {
             if (shown) return;
             shown = true;
             Bitmap b = ImageLoader.cached(pin.thumb, reqW);
-            if (b != null) { setImageBitmap(b); return; }
+            if (b != null) { shimmer.stop(); setImageBitmap(b); return; }
+            shimmer.start();
             final int g = gen;
             job = ImageLoader.load(pin.thumb, pin.full, reqW, Bitmap.Config.ARGB_8888, bmp -> {
-                if (!shown || g != gen || bmp == null) return;
+                if (!shown || g != gen) return;
+                shimmer.stop();
+                if (bmp == null) return;
                 setImageBitmap(bmp);
                 setAlpha(0f);
                 animate().alpha(1f).setDuration(200).start();
@@ -270,6 +281,7 @@ public final class MasonryGridView extends ScrollView {
             shown = false;
             if (job != null) job.cancel(false);
             job = null;
+            shimmer.stop();
             animate().cancel();
             setAlpha(1f);
             setScaleX(1f);

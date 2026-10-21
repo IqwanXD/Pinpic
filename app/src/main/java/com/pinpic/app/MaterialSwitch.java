@@ -79,6 +79,18 @@ public class MaterialSwitch extends CompoundButton {
 		animateTo(checked ? 1f : 0f);
 	}
 	
+	/**
+	 * Set state tanpa animasi geser. Dipakai saat saklar baru dibuat (layar dibuka atau
+	 * dibangun ulang karena ganti tema), supaya saklar yang sudah ON langsung tampil ON,
+	 * bukan mulai dari OFF lalu bergeser ke ON.
+	 */
+	public void setCheckedImmediate(boolean checked) {
+		if (animator != null) animator.cancel();
+		super.setChecked(checked);
+		progress = checked ? 1f : 0f;
+		invalidate();
+	}
+	
 	private void animateTo(float target) {
 		if (animator != null) animator.cancel();
 		

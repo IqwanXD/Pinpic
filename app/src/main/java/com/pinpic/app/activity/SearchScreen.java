@@ -20,6 +20,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import com.pinpic.app.IconDrawable;
+import com.pinpic.app.InoInputLayout;
 import com.pinpic.app.M3;
 import com.pinpic.app.Prefs;
 
@@ -58,15 +59,21 @@ public final class SearchScreen implements Screen {
     private final LinearLayout header;
     private final LinearLayout bar;
     private final View clearBtn;
-    private final TextView hint;
     private final FeedView feed;
     private final LinearLayout suggestList;
     private final FrameLayout.LayoutParams suggestLp;
     /** Baris saran dibuat sekali; saat mengetik hanya teksnya yang diganti (tidak ada kedip). */
     private final TextView[] suggestTexts = new TextView[SUGGEST_COUNT];
+    /** Bayangan atas di bawah kolom cari; tampil saat bottom sheet (mis. unduh) terbuka. Sama seperti di Beranda. */
+    private final View shade;
     private EditText input;
 
     public SearchScreen(Activity act, ScreenHost host) {
+        this(act, host, null);
+    }
+
+    /** prev != null: lanjutkan dari layar Cari lama (teks dan hasil) saat tema berubah. */
+    public SearchScreen(Activity act, ScreenHost host, SearchScreen prev) {
         this.act = act;
 
         root = new LinearLayout(act);
@@ -98,12 +105,20 @@ public final class SearchScreen implements Screen {
         input.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
         input.setPadding(M3.dp(12), 0, M3.dp(8), 0);
         bar.addView(input, new LinearLayout.LayoutParams(0, -1, 1f));
+        InoInputLayout.tintCursor(input);
 
         clearBtn = Ui.iconButton(act, IconDrawable.CLOSE, 0, M3.onSurfaceVariant, 40, 20,
                 () -> input.setText(""));
         clearBtn.setVisibility(View.GONE);
         bar.addView(clearBtn, new LinearLayout.LayoutParams(M3.dp(40), M3.dp(40)));
 
+        if (prev != null && prev.input != null) {
+            // Teks yang sudah diketik tetap ada; diisi sebelum listener dipasang agar tidak memunculkan saran.
+            String keep = prev.input.getText().toString();
+            input.setText(keep);
+            input.setSelection(keep.length());
+            clearBtn.setVisibility(keep.isEmpty() ? View.GONE : View.VISIBLE);
+        }
         input.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
             @Override public void onTextChanged(CharSequence s, int a, int b, int c) { }
@@ -123,21 +138,18 @@ public final class SearchScreen implements Screen {
         root.addView(header, new LinearLayout.LayoutParams(-1, -2));
 
         FrameLayout content = new FrameLayout(act);
-        feed = new FeedView(act, host);
-        feed.setVisibility(View.GONE);
+        // Cari langsung menampilkan gambar acak seperti beranda; dimuat terus saat digulir.
+        feed = prev != null ? new FeedView(act, host, false, prev.feed) : new FeedView(act, host);
         content.addView(feed, new FrameLayout.LayoutParams(-1, -1));
 
-        hint = M3.text(act, "Ketik kata kunci lalu tekan Cari di keyboard.", 15, M3.onSurfaceVariant, false);
-        hint.setGravity(Gravity.CENTER);
-        content.addView(hint, new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER));
-
-        // Gradasi di tepi atas daftar: gambar yang lewat di bawah kolom pencarian memudar.
-        View fade = new View(act);
-        fade.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{M3.background, M3.background & 0x00FFFFFF}));
-        content.addView(fade, new FrameLayout.LayoutParams(-1, M3.dp(32), Gravity.TOP));
-
         root.addView(content, new LinearLayout.LayoutParams(-1, 0, 1f));
+
+        // Bayangan atas: di atas hasil, di bawah saran (saran tetap paling depan).
+        shade = new View(act);
+        shade.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{M3.dark ? 0xB3000000 : 0x26000000, 0x00000000}));
+        shade.setAlpha(0f);
+        content.addView(shade, new FrameLayout.LayoutParams(-1, M3.dp(28), Gravity.TOP));
 
         // Saran: kartu mengambang di atas daftar, tepat di bawah kolom pencarian (gaya YouTube).
         // Ini view biasa (bukan PopupWindow), jadi tidak ikut terlepas dari window saat mengetik.
@@ -211,10 +223,8 @@ public final class SearchScreen implements Screen {
         hideKeyboard();
         input.clearFocus();
         dismissSuggestions();
-        if (q.isEmpty()) return;
-        hint.setVisibility(View.GONE);
-        feed.setVisibility(View.VISIBLE);
-        Prefs.recordSearch(q);
+        // Kosong = kembali ke gambar acak; isi = hasil pencarian.
+        if (!q.isEmpty()) Prefs.recordSearch(q);
         feed.search(q);
     }
 
@@ -223,9 +233,18 @@ public final class SearchScreen implements Screen {
         if (imm != null) imm.hideSoftInputFromWindow(input.getWindowToken(), 0);
     }
 
+    /** Bayangan atas tampil hanya saat diminta (MainActivity: sheet terbuka dan tidak ada pratinjau). */
+    public void setShadeVisible(boolean on) {
+        shade.animate().alpha(on ? 1f : 0f).setDuration(240).start();
+    }
+
     @Override public View getView() { return root; }
 
-    @Override public void onShown() { handler.removeCallbacks(rotateHint); handler.post(rotateHint); }
+    @Override public void onShown() {
+        handler.removeCallbacks(rotateHint);
+        handler.post(rotateHint);
+        feed.start();   // gambar acak pertama kali; setelahnya tidak diulang
+    }
 
     @Override public void onHidden() {
         handler.removeCallbacks(rotateHint);
